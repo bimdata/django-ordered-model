@@ -4,6 +4,9 @@ Change log
 Unreleased
 ----------
 
+- Add `ordered_model.fields.OrderedManyToManyField` which respects `Meta.ordering` when following ManyToMany related fields. 
+
+
 3.7.1 - 2023-03-06
 ----------
 
