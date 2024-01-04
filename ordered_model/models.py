@@ -3,7 +3,7 @@ from functools import partial, reduce
 from django.core import checks
 from django.core.exceptions import ObjectDoesNotExist, FieldDoesNotExist
 from django.db import models
-from django.db.models import Max, Min, F
+from django.db.models import Max, Min, F, Q
 from django.db.models.fields.related import ForeignKey
 from django.db.models.constants import LOOKUP_SEP
 from django.utils.module_loading import import_string
@@ -82,16 +82,29 @@ class OrderedModelQuerySet(models.QuerySet):
     def bulk_create(self, objs, *args, **kwargs):
         order_field_name = self._get_order_field_name()
         order_with_respect_to = self.model.get_order_with_respect_to()
+        order_field_lookup = self._get_order_field_lookup("max")
         objs = list(objs)
         order_with_respect_to_mapping = {}
+        wrt_map_items = set([frozenset(obj._wrt_map().items()) for obj in objs])
+        filter_objects = [Q(*wrt_map_item) for wrt_map_item in wrt_map_items]
+
+        qs = self.filter(reduce(lambda i, f: i | f if f else i, filter_objects))
+        if len(order_with_respect_to):
+            qs = qs.values(*order_with_respect_to)
+            qs = qs.annotate(**{order_field_lookup: Max(order_field_name)})
+        else:
+            qs = qs.aggregate(**{order_field_lookup: Max(order_field_name, default=-1)})
+            qs = [qs]
+        order_with_respect_to_mapping = {}
+        for item in qs:
+            order_max = item.pop(order_field_lookup)
+            order_with_respect_to_mapping[frozenset(item.items())] = order_max
         for obj in objs:
             key = frozenset(obj._wrt_map().items())
             if key in order_with_respect_to_mapping:
                 order_with_respect_to_mapping[key] += 1
             else:
-                order_with_respect_to_mapping[key] = self.filter(
-                    **obj._wrt_map()
-                ).get_next_order()
+                order_with_respect_to_mapping[key] = 0
             setattr(obj, order_field_name, order_with_respect_to_mapping[key])
         return super().bulk_create(objs, *args, **kwargs)
 
